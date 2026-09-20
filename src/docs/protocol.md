@@ -2,26 +2,40 @@
 
 ## 1. Purpose
 
-This document defines the initial protocol rules for SwasChain.
+This document defines the initial consensus-critical protocol rules for
+SwasChain.
 
-It describes the structure and validation requirements for:
+It describes the protocol-level requirements for:
 
-- Transactions
 - Accounts
-- Blocks
-- Block hashes
-- State transitions
-- Nonces
-- Signatures
+- Transactions
+- Transaction validation
 - Transaction ordering
-- Genesis state
-- Invalid data handling
+- State transitions
+- Blocks
+- Block validation
+- Block linking
+- State commitments
+- Transaction commitments
+- Genesis configuration
+- Consensus boundaries
+- Deterministic execution
+- Protocol versioning
 
-This document is the protocol-level contract that future SwasChain
-implementations must follow.
+This document acts as a high-level protocol contract for SwasChain.
 
-The implementation may evolve, but consensus-critical behavior must
-remain deterministic and explicitly specified.
+Exact transaction wire-format and cryptographic encoding requirements
+are defined by the transaction specification:
+
+    src/docs/transaction-spec.md
+
+Consensus, networking, and virtual-machine behavior are further defined
+by their respective protocol documents.
+
+The Rust implementation must conform to these specifications.
+
+Consensus-critical behavior must never be introduced implicitly through
+implementation details.
 
 ---
 
@@ -35,47 +49,57 @@ SwasChain aims to provide a blockchain protocol with:
 - Verifiable block linking
 - Explicit state transitions
 - Persistent and reproducible blockchain state
+- Independently verifiable blocks
 - Secure peer-to-peer validation
+- Clear consensus boundaries
 - Clear separation between protocol and application layers
+- Explicit protocol versioning
 
-The protocol should remain understandable enough that an independent
-implementation can eventually reproduce its consensus-critical rules.
+The protocol should remain sufficiently precise that an independent
+implementation can eventually reproduce all consensus-critical rules.
 
 ---
 
 ## 3. Initial Network Model
 
-SwasChain will initially operate as a permissioned development network
-while the protocol is being built and tested.
+SwasChain initially operates as a permissioned development network.
 
-The development network will allow controlled experimentation with
-multiple independent nodes.
+The initial development network is intended for:
 
-The protocol architecture should avoid depending on a single node.
+- Protocol development
+- Multi-node testing
+- Consensus testing
+- Networking testing
+- Failure testing
+- Adversarial testing
+- Performance benchmarking
 
-The eventual network model will support multiple participating nodes
-that independently:
+The initial network uses a controlled validator set.
 
-- Receive transactions
-- Validate transactions
-- Maintain state
-- Validate blocks
-- Exchange network messages
-- Participate in consensus
+The protocol architecture must not depend on a single node.
+
+Participating nodes must independently be capable of:
+
+- Receiving transactions
+- Validating transactions
+- Maintaining blockchain state
+- Constructing blocks where authorized
+- Validating blocks
+- Executing state transitions
+- Exchanging network messages
+- Participating in consensus
+- Recovering blockchain state
+
+The permissioned development model is an initial network configuration,
+not a limitation of the long-term protocol architecture.
 
 ---
 
 ## 4. Account Model
 
-SwasChain initially uses an account-based state model.
+SwasChain uses an account-based state model.
 
 An account contains:
-
-    Address
-    Balance
-    Nonce
-
-Conceptually:
 
     Account {
         address
@@ -83,41 +107,70 @@ Conceptually:
         nonce
     }
 
+The account state is deterministic and must be reproducible by every
+honest node.
+
 ### 4.1 Address
 
 An address uniquely identifies an account.
 
-The exact binary representation and human-readable encoding will be
-defined by the cryptographic implementation.
+For the initial transaction protocol, an address is derived from the
+account's public key.
 
-An address must be deterministically derived from the account's
-cryptographic identity according to the protocol rules.
+The address derivation rule is:
+
+    address = SHA256(public_key_bytes)
+
+The resulting address is exactly:
+
+    32 bytes
+
+The exact public-key encoding and transaction encoding rules are
+defined by:
+
+    src/docs/transaction-spec.md
+
+Addresses are treated as fixed-width binary protocol values.
+
+A human-readable address encoding may be introduced at the application
+or wallet layer without changing the underlying protocol address.
 
 ### 4.2 Balance
 
 Balance represents the amount of the native SwasChain asset controlled
 by an account.
 
+Balances use the protocol-defined unsigned integer representation.
+
 Balances must never become negative.
+
+All balance arithmetic must use checked arithmetic.
+
+An arithmetic overflow or underflow must cause the associated operation
+to fail rather than wrapping around.
 
 ### 4.3 Nonce
 
 Each account has a monotonically increasing nonce.
 
-The nonce provides transaction ordering and replay protection.
+The nonce provides:
 
-For a transaction submitted by an account:
+- Transaction ordering
+- Replay protection
+- Sequential account execution
+
+For the initial protocol:
 
     transaction.nonce == account.nonce
 
-must be satisfied before that transaction can be executed.
+must be satisfied before the transaction can execute.
 
 After successful execution:
 
     account.nonce = account.nonce + 1
 
-A transaction that has already been executed must not be executable
-again with the same nonce.
+A transaction whose nonce has already been consumed must not execute
+again.
 
 ---
 
@@ -125,10 +178,11 @@ again with the same nonce.
 
 A SwasChain transaction represents a request to modify blockchain state.
 
-The initial transaction model is:
+The initial transaction structure is:
 
     Transaction {
         version
+        chain_id
         sender
         recipient
         amount
@@ -137,7 +191,20 @@ The initial transaction model is:
         signature
     }
 
-Each field has a specific protocol purpose.
+The transaction fields have the following protocol-level meaning:
+
+- version: transaction protocol version
+- chain_id: network/domain identifier
+- sender: source account address
+- recipient: destination account address
+- amount: value transferred
+- nonce: sender transaction sequence number
+- fee: transaction processing fee
+- signature: authorization proof
+
+The exact binary layout is defined by:
+
+    src/docs/transaction-spec.md
 
 ---
 
@@ -145,191 +212,364 @@ Each field has a specific protocol purpose.
 
 ### 6.1 Version
 
-The version identifies the transaction encoding and protocol rules
-used to interpret the transaction.
+The transaction version identifies the transaction encoding and
+validation rules used to interpret the transaction.
 
-This allows future protocol upgrades without making old transaction
-formats ambiguous.
+The initial transaction version is:
 
-### 6.2 Sender
+    version = 1
+
+Unsupported transaction versions must be rejected.
+
+Future versions must define explicit compatibility and activation rules.
+
+### 6.2 Chain ID
+
+Each transaction contains a protocol-defined chain identifier.
+
+The chain ID separates transaction domains between independent SwasChain
+networks.
+
+A transaction signed for one chain must not be valid on another chain
+with a different chain ID.
+
+The chain ID therefore forms part of the transaction's signed domain.
+
+The initial representation is:
+
+    uint32
+
+encoded in:
+
+    big-endian
+
+The exact transaction encoding is defined in the transaction
+specification.
+
+### 6.3 Sender
 
 The sender identifies the account authorizing the transaction.
 
-The sender must correspond to the public key or cryptographic identity
-used to verify the transaction signature.
+The sender is a 32-byte protocol address.
 
-### 6.3 Recipient
+The sender must correspond to the public key whose signature validates
+the transaction.
 
-The recipient identifies the account that receives the transferred
-value.
+The relationship is:
 
-The recipient must be represented using the protocol-defined address
-format.
+    public key
+        |
+        v
+    SHA256(public key bytes)
+        |
+        v
+      address
+        |
+        v
+      sender
 
-### 6.4 Amount
+A transaction is invalid if its signature does not authenticate the
+claimed sender.
 
-Amount specifies how much value is transferred.
+### 6.4 Recipient
 
-The amount must:
+The recipient identifies the account receiving transferred value.
 
-- Be non-negative
-- Be representable by the protocol's integer type
-- Not exceed the sender's spendable balance after accounting for fees
+The recipient is represented as a 32-byte protocol address.
 
-### 6.5 Nonce
+The initial native-transfer protocol does not require the recipient to
+have previously existed as an account.
+
+Account creation semantics will be defined by the state implementation.
+
+### 6.5 Amount
+
+Amount specifies the native value transferred from sender to recipient.
+
+The initial representation is:
+
+    uint64
+
+encoded in:
+
+    big-endian
+
+Amount must not exceed the sender's available balance after accounting
+for the transaction fee.
+
+All arithmetic must use checked operations.
+
+### 6.6 Nonce
 
 Nonce identifies the transaction sequence number for the sender.
 
-A transaction with an incorrect nonce must not be executed.
+The initial representation is:
 
-### 6.6 Fee
+    uint64
+
+encoded in:
+
+    big-endian
+
+For a transaction to execute successfully:
+
+    transaction.nonce == current_sender_nonce
+
+A transaction with a future or already-consumed nonce must not execute.
+
+### 6.7 Fee
 
 Fee represents the amount paid by the sender for transaction
 processing.
 
-The exact fee economics will be finalized as the execution and block
-production system is implemented.
+The initial representation is:
 
-For the initial implementation, fee handling must still be
-deterministic.
+    uint64
 
-### 6.7 Signature
+encoded in:
 
-The signature proves that the sender authorized the transaction.
+    big-endian
 
-A node must verify the signature before accepting the transaction.
+The sender must have sufficient balance to cover:
+
+    amount + fee
+
+Fee accounting must be deterministic.
+
+The exact fee recipient/distribution rule must be finalized before block
+execution is implemented.
+
+No implementation may silently introduce fee economics that are not
+defined by the protocol.
+
+### 6.8 Signature
+
+The initial transaction signature algorithm is:
+
+    Ed25519
+
+The signature size is:
+
+    64 bytes
+
+The signature proves authorization by the sender's corresponding
+private key.
 
 An invalid signature makes the transaction invalid.
+
+Private keys must never be transmitted as part of a transaction.
 
 ---
 
 ## 7. Transaction Signing
 
-A transaction must be signed over a canonical representation of its
-signable fields.
+The initial transaction signing protocol uses Ed25519.
 
-The signature must not include itself as part of the signed message.
+A transaction is signed over a deterministic domain-separated message.
 
-Conceptually:
+The canonical unsigned transaction contains:
 
-    SignableTransaction
-            |
-            v
-        Serialize
-            |
-            v
-           Hash
-            |
-            v
-       Sign with Key
-            |
-            v
-         Signature
+    version
+    chain_id
+    sender
+    recipient
+    amount
+    nonce
+    fee
 
-The signature is then attached to the transaction.
+The signed message is:
 
-Every node must reconstruct the same signable representation before
-verifying the signature.
+    "SWASCHAIN_TX_V1"
+        ||
+    canonical_unsigned_transaction
+
+Where:
+
+    || = byte concatenation
+
+The domain separator prevents the transaction signature from being
+implicitly shared with unrelated signing contexts.
+
+The signing process is conceptually:
+
+    Transaction Fields
+          |
+          v
+    Canonical Serialization
+          |
+          v
+    Add Domain Separator
+          |
+          v
+    Signed Message
+          |
+          v
+    Ed25519 Sign
+          |
+          v
+       Signature
+
+The signature itself is not included in the signed message.
+
+Every compatible implementation must reconstruct exactly the same
+signed byte sequence before verifying the signature.
+
+The exact byte-level encoding is defined in:
+
+    src/docs/transaction-spec.md
 
 ---
 
-## 8. Canonical Serialization
+## 8. Canonical Transaction Serialization
 
-Consensus-critical data must have deterministic serialization.
+Consensus-critical transaction serialization must be deterministic.
 
-The same logical transaction must produce exactly the same serialized
-bytes on every compatible implementation.
+The initial transaction serialization defines:
 
-Canonical serialization must define:
+- Fixed field ordering
+- Fixed-width integer representation
+- Big-endian integer encoding
+- Fixed-width address encoding
+- Fixed-width signature encoding
+- Explicit protocol version
+- Explicit chain ID
+- No ambiguous optional fields
 
-- Field ordering
-- Integer representation
-- Byte ordering
-- String or byte encoding
-- Optional field representation
-- Version handling
+The canonical unsigned transaction contains:
 
-No consensus-critical hash or signature may depend on ambiguous
-serialization.
+    version
+    chain_id
+    sender
+    recipient
+    amount
+    nonce
+    fee
+
+The unsigned transaction size for version 1 is:
+
+    93 bytes
+
+The complete transaction including the signature is:
+
+    157 bytes
+
+The transaction specification is authoritative for exact byte layout.
+
+No consensus-critical implementation may use language-specific object
+serialization, unordered maps, implicit padding, locale-dependent
+encoding, or other ambiguous serialization.
 
 ---
 
 ## 9. Transaction Hash
 
-Every transaction will have a deterministic transaction identifier.
+Every transaction has a deterministic transaction identifier.
+
+The initial hash algorithm is:
+
+    SHA-256
+
+The transaction hash uses the domain separator:
+
+    "SWASCHAIN_TX_HASH_V1"
+
+The transaction hash is derived from the canonical complete transaction
+representation according to the transaction specification.
 
 Conceptually:
 
+    Domain Separator
+          ||
+    Canonical Transaction Bytes
+          |
+          v
+       SHA-256
+          |
+          v
     Transaction Hash
-        =
-    Hash(Canonical Transaction Bytes)
 
-The transaction hash must uniquely identify the serialized transaction
-under the selected cryptographic hash function.
+The transaction hash is used for:
 
-The transaction hash will be used for:
-
-- Transaction lookup
+- Transaction identification
 - Duplicate detection
+- Mempool tracking
 - Block transaction commitments
+- Transaction lookup
 - Future explorer functionality
 
-The exact hash algorithm will be selected and documented in the
-cryptography specification.
+Identical canonical transactions must produce identical transaction
+hashes.
 
 ---
 
 ## 10. Transaction Validation
 
 A transaction must pass all required validation rules before it can
-enter the confirmed blockchain state.
+modify canonical blockchain state.
 
 Initial validation includes:
 
-1. Correct transaction version
-2. Valid sender format
-3. Valid recipient format
-4. Valid signature
-5. Correct nonce
-6. Valid amount
-7. Sufficient sender balance
-8. Valid fee
-9. No integer overflow
-10. No invalid encoding
-11. No duplicate execution
+1. Supported transaction version
+2. Correct chain ID
+3. Valid sender address
+4. Valid recipient address
+5. Valid canonical encoding
+6. Valid Ed25519 signature
+7. Correct sender nonce
+8. Valid amount
+9. Valid fee
+10. Sufficient sender balance
+11. No arithmetic overflow or underflow
+12. No replay through a consumed nonce
+13. No duplicate execution
 
 Conceptually:
 
-    Transaction
-         |
-         v
-    Basic Validation
-         |
-         v
+    Raw Transaction
+          |
+          v
+    Decode / Encoding Validation
+          |
+          v
+    Protocol Validation
+          |
+          v
     Signature Validation
-         |
-         v
+          |
+          v
     State Validation
-         |
-         v
+          |
+          v
     Valid Transaction
 
-Any failed validation rule causes rejection.
+Any failed consensus-critical validation rule causes rejection.
 
 ---
 
 ## 11. Transaction Replay Protection
 
-SwasChain must prevent previously executed transactions from being
+SwasChain must prevent previously authorized transactions from being
 executed again.
 
-The primary replay protection mechanism is the account nonce.
+Replay protection operates at multiple protocol boundaries.
+
+### 11.1 Chain Domain Protection
+
+The chain ID is included in the signed transaction message.
+
+Therefore, a transaction signed for one chain is not automatically valid
+on another chain with a different chain ID.
+
+### 11.2 Nonce Protection
+
+The sender nonce prevents the same transaction sequence number from
+being consumed repeatedly.
 
 Example:
 
     Account nonce = 7
 
-A valid next transaction must use:
+The next valid transaction must contain:
 
     nonce = 7
 
@@ -337,17 +577,27 @@ After successful execution:
 
     Account nonce = 8
 
-A second transaction using:
+A second transaction attempting to execute with:
 
     nonce = 7
 
-must not be accepted for execution.
+must be rejected.
+
+### 11.3 Transaction Identity
+
+The transaction hash provides deterministic transaction identity for
+duplicate detection.
+
+Nodes must not treat transaction hash tracking as a replacement for
+nonce validation.
+
+Nonce validation remains part of consensus-critical state validation.
 
 ---
 
 ## 12. Transaction Ordering
 
-Transactions from the same account are ordered by nonce.
+Transactions from the same account are strictly ordered by nonce.
 
 For example:
 
@@ -359,14 +609,24 @@ The protocol must not execute nonce 6 before nonce 5 for the same
 account.
 
 Transactions from different accounts may be ordered by the block
-producer according to the block construction rules, provided that the
-resulting state transition remains deterministic.
+producer according to the deterministic block-construction rules.
+
+The final transaction ordering policy must be deterministic and must
+not depend on:
+
+- Local hash-map ordering
+- Network arrival timing alone
+- Local machine behavior
+- Unspecified implementation details
+
+The consensus and block-engine specifications will define the exact
+ordering algorithm before block production is considered final.
 
 ---
 
 ## 13. State Transition
 
-The blockchain state changes only through valid transactions.
+Blockchain state changes only through valid transactions.
 
 Conceptually:
 
@@ -376,7 +636,7 @@ Conceptually:
         =
     State After
 
-For a simple transfer:
+For an initial native transfer:
 
     Sender Balance
         =
@@ -390,16 +650,20 @@ For a simple transfer:
         =
     Sender Nonce + 1
 
-The transition must be atomic.
+The state transition must be atomic.
 
-If a transaction fails validation or execution, its state changes must
-not be partially applied.
+If validation or execution fails, no partial state mutation may become
+part of canonical state.
+
+All arithmetic must use checked operations.
+
+The execution result must be deterministic across all compatible nodes.
 
 ---
 
 ## 14. Block Model
 
-A SwasChain block contains a header and a transaction set.
+A SwasChain block contains a header and an ordered transaction set.
 
 Conceptually:
 
@@ -408,7 +672,7 @@ Conceptually:
         transactions
     }
 
-The block header is expected to contain:
+The initial block header contains:
 
     BlockHeader {
         version
@@ -420,7 +684,10 @@ The block header is expected to contain:
         consensus_data
     }
 
-The exact encoding will be finalized during implementation.
+The exact binary block serialization will be defined before block
+hashing and persistent block storage are finalized.
+
+Block structure must remain deterministic across implementations.
 
 ---
 
@@ -442,7 +709,7 @@ Then:
     height = 3
     ...
 
-For a valid non-genesis block:
+For every valid non-genesis block:
 
     current.height = previous.height + 1
 
@@ -452,7 +719,7 @@ A block with an invalid height must be rejected.
 
 ## 16. Previous Block Hash
 
-Every non-genesis block references the hash of the previous block.
+Every non-genesis block references the hash of its predecessor.
 
 Conceptually:
 
@@ -463,54 +730,75 @@ Conceptually:
                   v
              Hash(Block N-1)
 
-This creates a cryptographic chain between blocks.
+This creates a cryptographically linked chain.
 
-A block whose previous block hash does not match the expected canonical
-predecessor must not be accepted into the canonical chain.
+For a non-genesis block:
+
+    current.previous_block_hash
+        ==
+    expected_previous_block_hash
+
+must be satisfied.
+
+A block referencing an incorrect predecessor must be rejected.
 
 ---
 
 ## 17. Block Timestamp
 
-Each block contains a timestamp.
+Each block contains a protocol-defined timestamp.
 
-The timestamp must be represented using a deterministic protocol-defined
-format.
+The initial timestamp representation and exact encoding must be
+deterministic.
 
-Consensus rules will define acceptable timestamp relationships,
-including protection against unreasonable timestamps.
+Consensus rules define acceptable timestamp relationships.
 
-Consensus-critical execution must never depend on a node's local clock
-after the block has been accepted.
+At minimum:
+
+    block_timestamp >= parent_timestamp
+
+A block timestamp must also satisfy the maximum permitted future drift
+defined by the consensus specification.
+
+The exact future-drift constant must be finalized before consensus
+implementation is considered complete.
+
+Consensus-critical execution must never use a node's local wall clock
+as an input after a block has been accepted.
 
 ---
 
 ## 18. Transaction Root
 
-The block header contains a transaction commitment.
+The block header contains a cryptographic commitment to the ordered
+transaction set.
 
 Conceptually:
 
-    Transactions
-         |
-         v
-    Transaction Tree
-         |
-         v
+    Ordered Transactions
+          |
+          v
+    Transaction Commitment
+          |
+          v
     Transaction Root
 
 The transaction root allows nodes to verify that the transactions
-represented by the block correspond to the block header.
+represented by a block correspond to the header commitment.
 
-The exact commitment structure will be finalized during the
-cryptographic and block-engine phases.
+The initial implementation may use a deterministic Merkle-tree-based
+commitment.
+
+The exact tree construction, leaf encoding, internal-node hashing,
+empty-tree behavior, and ordering rules must be finalized before block
+commitments are consensus-critical.
 
 ---
 
 ## 19. State Root
 
-The block header contains a commitment representing the resulting
-blockchain state.
+The block header contains a cryptographic commitment representing the
+resulting blockchain state.
 
 Conceptually:
 
@@ -519,7 +807,7 @@ Conceptually:
     Block Transactions
           |
           v
-    State Transition
+    Deterministic State Transition
           |
           v
        New State
@@ -527,36 +815,43 @@ Conceptually:
           v
       State Root
 
-A node independently executing the block must derive the same state
-root.
+Every honest node independently executing the same valid block from the
+same previous state must derive the same state root.
 
 If the computed state root does not match the block's declared state
 root, the block must be rejected.
+
+The exact state commitment structure will be finalized with the state
+and persistent-storage implementation.
 
 ---
 
 ## 20. Block Hash
 
-A block hash is derived from the canonical block representation.
+A block hash is derived from the canonical block header representation.
 
 Conceptually:
 
-    Block Hash
-        =
-    Hash(Canonical Block Header)
+    Canonical Block Header
+            |
+            v
+          SHA-256
+            |
+            v
+        Block Hash
 
-The exact hashing process will be finalized by the cryptographic
-specification.
+The exact domain-separated hashing construction will be defined by the
+block and cryptographic specifications before implementation is locked.
 
 The block hash must be deterministic.
 
-Identical valid block headers must produce identical hashes.
+Identical canonical block headers must produce identical block hashes.
 
 ---
 
 ## 21. Genesis Block
 
-The genesis block is the first block in the SwasChain history.
+The genesis block is the first block in SwasChain history.
 
 The genesis block has:
 
@@ -566,18 +861,24 @@ It does not reference a previous SwasChain block.
 
 The genesis configuration must be deterministic and reproducible.
 
-The genesis definition will eventually specify:
+The genesis definition must specify:
 
 - Network identifier
+- Chain ID
 - Initial state
 - Initial accounts
 - Initial balances, if any
 - Protocol version
 - Genesis timestamp
-- Genesis block metadata
+- Validator configuration
+- Consensus configuration
+- Genesis metadata
 
 Every node operating on the same network must use the same genesis
 configuration.
+
+A node configured with an incompatible genesis configuration must not
+participate in that network.
 
 ---
 
@@ -588,17 +889,19 @@ A node must validate a received block before accepting it.
 Initial validation includes:
 
 1. Valid block encoding
-2. Valid block version
+2. Supported block version
 3. Correct block height
 4. Correct previous block hash
 5. Valid timestamp
 6. Valid transaction commitment
-7. Valid state commitment
+7. Valid transaction ordering
 8. Valid transactions
 9. Correct state transition
-10. Valid consensus metadata
+10. Correct state root
+11. Valid consensus metadata
+12. Valid producer/validator authorization where required
 
-A block failing any required validation rule must be rejected.
+A block failing any required consensus rule must be rejected.
 
 ---
 
@@ -611,7 +914,13 @@ Conceptually:
     Previous State
           |
           v
-    Validate Block
+    Decode Block
+          |
+          v
+    Validate Header
+          |
+          v
+    Validate Transactions
           |
           v
     Execute Transactions
@@ -623,59 +932,75 @@ Conceptually:
     Compute State Root
           |
           v
-    Compare With Block
+    Compare Commitments
           |
           v
-    Accept / Reject
+    Consensus Acceptance
+          |
+          v
+    Commit Canonical State
 
-A node must not modify canonical state until the block has passed the
-required validation and execution checks.
+A node must not modify canonical state based solely on receiving a
+block.
+
+Canonical state changes only after all required validation,
+execution, and consensus conditions have been satisfied.
 
 ---
 
 ## 24. Chain Selection
 
-The initial development network will define a single canonical chain.
+The initial development network uses the consensus protocol defined in:
 
-The final chain-selection mechanism will depend on the consensus
-protocol selected in the consensus phase.
+    src/docs/consensus.md
 
-A node must never accept a competing chain solely because it was
-received from another peer.
+A node must not accept a competing chain solely because it was received
+from another peer.
 
-Candidate chains must satisfy the protocol's validation and consensus
-rules.
+Candidate blocks and chains must satisfy:
+
+- Protocol validation
+- State-transition validation
+- Consensus rules
+- Chain identity requirements
+- Genesis compatibility
+
+The final canonical-chain selection and finality rules are determined
+by the consensus protocol.
 
 ---
 
 ## 25. Invalid Transactions
 
-Invalid transactions must not modify blockchain state.
+Invalid transactions must never modify canonical blockchain state.
 
 Examples include:
 
 - Invalid signature
+- Incorrect chain ID
 - Incorrect nonce
 - Insufficient balance
 - Invalid amount
 - Invalid fee
 - Invalid encoding
 - Unsupported version
+- Arithmetic overflow
+- Replay of an already-consumed nonce
 
-Depending on where the transaction is encountered, the node may:
+Depending on where the transaction is encountered, a node may:
 
 - Reject it at RPC submission
 - Reject it from the mempool
 - Reject it during block validation
 
-An invalid transaction must never be executed as a valid state
-transition.
+A transaction rejected at one stage must not bypass the same
+consensus-critical validation at a later stage.
 
 ---
 
 ## 26. Invalid Blocks
 
-An invalid block must not become part of the canonical chain.
+An invalid block must never become part of the canonical chain.
 
 Examples include:
 
@@ -686,10 +1011,18 @@ Examples include:
 - Invalid state root
 - Invalid block encoding
 - Invalid consensus metadata
-- Invalid timestamp according to protocol rules
+- Invalid producer authorization
+- Invalid timestamp
+- Invalid transaction ordering
 
-Nodes should record sufficient information for debugging and
-observability when rejecting invalid blocks.
+Nodes should record sufficient diagnostic information to support:
+
+- Debugging
+- Incident investigation
+- Consensus testing
+- Network observability
+
+Diagnostic information must not alter consensus state.
 
 ---
 
@@ -697,7 +1030,7 @@ observability when rejecting invalid blocks.
 
 SwasChain follows a strict validation boundary.
 
-All externally supplied data is considered untrusted.
+All externally supplied data is untrusted.
 
 This includes:
 
@@ -723,6 +1056,9 @@ The general rule is:
 
 No external data should directly mutate consensus-critical state.
 
+Parsing, validation, execution, and persistence must have clear
+boundaries.
+
 ---
 
 ## 28. Deterministic Execution Requirements
@@ -736,25 +1072,41 @@ Consensus-critical execution must not depend on:
 - Unstable floating-point behavior
 - Local timezone
 - Node-specific external services
+- Unspecified thread scheduling
+- Unordered collection iteration
 
 Protocol execution should use deterministic integer and byte-based
 operations wherever possible.
+
+All consensus-critical data structures must have deterministic
+serialization and iteration behavior.
+
+If concurrency is introduced in execution, the final state and all
+consensus-visible results must remain deterministic.
 
 ---
 
 ## 29. Protocol Versioning
 
-SwasChain protocol structures will include version information where
-necessary.
+SwasChain protocol structures use explicit version information where
+required.
 
 Versioning exists to allow future protocol upgrades while maintaining
 clear interpretation of historical data.
 
-A node must reject unsupported protocol versions when required by the
+A node must reject unsupported protocol versions when required by
 network rules.
 
-Future upgrades must define compatibility and activation rules before
-being considered consensus-safe.
+Future protocol upgrades must define:
+
+- New protocol version
+- Compatibility rules
+- Activation mechanism
+- Migration behavior
+- Historical interpretation
+- Rollback or failure behavior where applicable
+
+No consensus-critical protocol change should be silently introduced.
 
 ---
 
@@ -762,8 +1114,7 @@ being considered consensus-safe.
 
 The initial protocol focuses on native account transactions.
 
-However, the architecture reserves a future execution layer for smart
-contracts.
+The architecture reserves a future execution layer for smart contracts.
 
 Future execution may follow:
 
@@ -781,13 +1132,23 @@ Future execution may follow:
          v
     Contract State
 
-Smart contract execution must preserve the same core requirements:
+The future VM architecture is defined separately in:
+
+    src/docs/vm.md
+
+Smart contract execution must preserve the same core protocol
+requirements:
 
 - Determinism
 - Verifiability
 - Resource limits
 - State integrity
 - Consensus compatibility
+- Canonical serialization
+- Cross-node reproducibility
+
+Smart contracts are not part of the initial native-transfer
+implementation.
 
 ---
 
@@ -809,95 +1170,170 @@ A transaction with an already-consumed nonce must not execute again.
 
 ### Invariant 4
 
-Every non-genesis block references the correct previous block.
+The transaction chain ID must match the network chain ID.
 
 ### Invariant 5
 
-Block height increases sequentially.
+Every valid transaction signature must authenticate its sender.
 
 ### Invariant 6
+
+Every non-genesis block references the correct previous block.
+
+### Invariant 7
+
+Block height increases sequentially.
+
+### Invariant 8
 
 All honest nodes executing the same valid block from the same previous
 state must derive the same resulting state.
 
-### Invariant 7
+### Invariant 9
 
 A block with an incorrect state root must be rejected.
 
-### Invariant 8
+### Invariant 10
 
 An invalid transaction must never modify canonical state.
 
-### Invariant 9
+### Invariant 11
 
 Consensus-critical serialization must be deterministic.
 
-### Invariant 10
+### Invariant 12
 
 Untrusted network input must pass validation before entering
 consensus-critical processing.
+
+### Invariant 13
+
+Consensus-critical arithmetic must not overflow or underflow.
+
+### Invariant 14
+
+A transaction signed for a different chain ID must not be accepted.
 
 ---
 
 ## 32. Initial Protocol Scope
 
-The first implementation will focus on:
+The first implementation focuses on:
 
 - Native account transfers
-- Digital signatures
+- Ed25519 transaction signatures
+- SHA-256 hashing
+- Chain IDs
+- Addresses
 - Nonces
 - Transaction validation
 - Deterministic state transitions
 - Block construction
 - Block validation
+- Transaction commitments
+- State commitments
 - Persistent blockchain state
+- Permissioned multi-node operation
+- Consensus integration
 
-The following will be implemented later:
+The following are intentionally deferred:
 
 - Advanced smart contracts
 - SwasVM bytecode execution
 - Gas/resource metering
 - Parallel execution
 - Advanced validator economics
+- Permissionless validator admission
 - Developer SDKs
+- Advanced networking transports
 
 This staged approach keeps the initial protocol small enough to verify
 while preserving a clear path toward a more capable blockchain system.
 
 ---
 
-## 33. Implementation Rule
+## 33. Specification Authority
 
-The Rust implementation must follow this specification.
+SwasChain uses layered protocol specifications.
 
-If implementation behavior conflicts with a consensus-critical protocol
-rule, the implementation must be corrected or the specification must
-be explicitly updated.
+The documents have distinct responsibilities:
 
-Protocol changes must be documented rather than silently introduced.
+### Architecture
+
+Defines system-level components and their relationships.
+
+### Protocol
+
+Defines high-level consensus-critical behavior and invariants.
+
+### Transaction Specification
+
+Defines exact transaction fields, cryptographic algorithms,
+serialization, signing, hashing, and wire-format requirements.
+
+### Consensus Specification
+
+Defines validator behavior, block proposal, voting, finality,
+rounds, and fork handling.
+
+### Networking Specification
+
+Defines peer communication, message types, synchronization, and
+network-level validation.
+
+### VM Specification
+
+Defines the future deterministic smart-contract execution boundary.
+
+If two specifications conflict, the conflict must be resolved explicitly
+before implementation continues.
+
+No implementation should silently choose one conflicting rule.
 
 ---
 
-## 34. Current Status
+## 34. Implementation Rule
+
+The Rust implementation must follow the protocol specifications.
+
+If implementation behavior conflicts with a consensus-critical rule:
+
+1. The implementation must be corrected, or
+2. The specification must be explicitly updated.
+
+Protocol changes must be:
+
+- Documented
+- Reviewed
+- Tested
+- Reflected in affected specifications
+- Represented by a meaningful Git commit
+
+Consensus-critical behavior must never be changed silently.
+
+---
+
+## 35. Current Status
 
 SwasChain is currently in:
 
 **Phase 1 — Architecture & Protocol Design**
 
-The high-level architecture has been documented.
+The following design documents have been established:
 
-This document defines the initial protocol model.
+- Architecture specification
+- Protocol specification
+- Transaction specification
+- Consensus specification
+- Networking specification
+- SwasVM architecture specification
 
-The next protocol documents will further specify:
+The protocol is intentionally being reviewed for cross-document
+consistency before consensus-critical implementation begins.
 
-- Transaction serialization
-- Cryptographic algorithms
-- Block serialization
-- State representation
-- Storage format
-- Networking protocol
-- Consensus protocol
+The next stage is to audit all specifications together and resolve any
+remaining contradictions or undefined consensus-critical parameters.
 
 No consensus-critical implementation should be considered final until
-the corresponding protocol behavior has been explicitly defined and
-tested.
+the corresponding protocol behavior has been explicitly defined,
+implemented, and tested.
