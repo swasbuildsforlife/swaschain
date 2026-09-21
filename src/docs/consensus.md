@@ -117,21 +117,29 @@ Validator private keys must never be transmitted to peers.
 
 Validator identities must be explicitly known to the development network.
 
-
 ## 6. Block Producer Selection
 
-For the initial permissioned network, block producers are selected from the configured validator set.
+For the initial permissioned network, block producers are selected from
+the configured validator set.
 
 Let:
 
     validators = [V0, V1, V2, ... Vn]
 
-The initial deterministic producer selection rule is:
+The genesis block has:
+
+    height = 0
+
+The genesis block is not assigned a producer through the normal
+round-robin schedule.
+
+For every non-genesis block, the deterministic producer selection rule
+is:
 
     producer(height) =
-        validators[height mod validator_count]
+        validators[(height - 1) mod validator_count]
 
-This creates a deterministic round-robin schedule.
+This means the first block after genesis is produced by V0.
 
 Example:
 
@@ -141,15 +149,36 @@ Example:
         V2
         V3
 
-    Height 1 -> V1
-    Height 2 -> V2
-    Height 3 -> V3
-    Height 4 -> V0
-    Height 5 -> V1
+    Height 1 -> V0
+    Height 2 -> V1
+    Height 3 -> V2
+    Height 4 -> V3
+    Height 5 -> V0
+    Height 6 -> V1
 
-The exact genesis height convention must be implemented consistently.
+The producer schedule is completely deterministic.
 
-The producer schedule must never depend on local randomness.
+The producer selection must never depend on:
+
+- Local randomness
+- Network arrival order
+- Local system time
+- Mempool contents
+- Operating system behavior
+- Unspecified implementation details
+
+The validator set used for producer selection must be the active
+consensus validator set for the corresponding block height.
+
+For the initial protocol, the validator set is static and defined by
+the genesis consensus configuration.
+
+If the validator set changes in a future protocol version, the
+activation height and producer-selection behavior must be explicitly
+defined as consensus rules.
+
+A node must independently calculate the expected producer for every
+block before accepting the proposal.
 
 
 ## 7. Proposal Eligibility
