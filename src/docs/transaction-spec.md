@@ -1076,3 +1076,42 @@ After this specification is reviewed and committed, the next Phase 1 work is to 
     VM interface specification
 
 After the protocol documents are stable, implementation begins with the Rust foundation and strongly typed transaction primitives.
+## Transaction Lifecycle
+
+A transaction moves through a defined lifecycle before becoming part of the blockchain state.
+
+### 1. Creation
+
+The transaction is created by a client or application with the required fields defined by the transaction specification.
+
+### 2. Validation
+
+A node validates the transaction against the protocol rules, including:
+
+- Required fields
+- Transaction format
+- Sender information
+- Nonce or sequence requirements
+- Value constraints
+- Cryptographic authorization
+- Any applicable protocol limits
+
+Invalid transactions are rejected before entering the transaction processing pipeline.
+
+### 3. Propagation
+
+A valid transaction may be propagated to connected peers through the networking layer.
+
+### 4. Inclusion
+
+The transaction can be selected for inclusion in a candidate block according to the block production and consensus rules.
+
+### 5. Execution
+
+When the block is accepted, the transaction is executed according to the protocol's state-transition rules.
+
+### 6. Final State
+
+After successful execution, the resulting state becomes part of the blockchain state represented by the accepted block.
+
+This lifecycle separates transaction creation, validation, propagation, inclusion, and execution, making each stage easier to implement and verify independently.
