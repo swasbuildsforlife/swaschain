@@ -95,6 +95,9 @@ The repository structure will evolve as implementation work begins.
 
 SwasChain is currently in the protocol design and documentation phase.
 
+The current development effort is focused on turning the documented protocol concepts into modular implementations while keeping the protocol specifications version-controlled and reviewable.
+
+Documentation and implementation will evolve together as the design is tested and refined.
 Completed
 In Progress
  Core blockchain implementation
