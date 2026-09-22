@@ -788,3 +788,14 @@ being defined.
 
 Implementation should proceed only after the relevant protocol rules
 are sufficiently specified.
+## Design Principles
+
+SwasChain architecture is guided by a few core principles:
+
+- **Modularity:** Protocol components should have clear responsibilities and well-defined boundaries.
+- **Determinism:** State transitions and validation rules should produce predictable results across nodes.
+- **Verifiability:** Important protocol operations should be independently verifiable by participating nodes.
+- **Extensibility:** The architecture should allow individual components to evolve without requiring a complete redesign of the protocol.
+- **Explicit Specifications:** Protocol behavior should be documented before or alongside implementation.
+
+These principles provide a foundation for implementing the protocol while keeping the system understandable and maintainable.
