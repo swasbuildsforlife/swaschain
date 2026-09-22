@@ -1337,3 +1337,28 @@ remaining contradictions or undefined consensus-critical parameters.
 No consensus-critical implementation should be considered final until
 the corresponding protocol behavior has been explicitly defined,
 implemented, and tested.
+## Protocol Invariants
+
+SwasChain protocol rules should preserve a set of fundamental invariants across all valid state transitions.
+
+### State Consistency
+
+Every accepted state transition must produce a deterministic and internally consistent result.
+
+### Transaction Validity
+
+A transaction must satisfy the protocol's validation requirements before it can affect blockchain state.
+
+### Block Validity
+
+A block must satisfy the defined structural, ordering, and validation rules before it can be accepted by a node.
+
+### Consensus Consistency
+
+Nodes following the protocol should be able to independently verify whether proposed blocks satisfy the consensus rules.
+
+### Deterministic Execution
+
+Given the same valid input state and transaction set, protocol execution should produce the same resulting state.
+
+These invariants provide a foundation for reliable validation and help keep protocol behavior consistent across participating nodes.
