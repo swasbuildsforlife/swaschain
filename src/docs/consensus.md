@@ -1015,3 +1015,29 @@ After this document is committed, the remaining major Phase 1 protocol documents
     VM Interface Specification
 
 After the Phase 1 specifications are stable, implementation can begin with the Rust foundation and strongly typed protocol primitives.
+## Consensus Validation Flow
+
+Consensus validation defines how a node evaluates a proposed block before accepting it as part of the canonical chain.
+
+A simplified validation flow is:
+
+1. **Receive Proposal**
+   - The node receives a proposed block from a peer or block producer.
+
+2. **Validate Structure**
+   - Verify that the block contains the required fields and follows the defined block format.
+
+3. **Validate Parent**
+   - Confirm that the referenced parent block is known and consistent with the local chain.
+
+4. **Validate Transactions**
+   - Verify that transactions included in the block satisfy the transaction and execution rules.
+
+5. **Verify Consensus Requirements**
+   - Check that the proposal satisfies the protocol's consensus-specific requirements.
+
+6. **Accept or Reject**
+   - A valid proposal may be accepted for further processing.
+   - An invalid proposal is rejected and must not modify the canonical state.
+
+The validation process allows participating nodes to independently verify proposed blocks rather than trusting the block producer.
