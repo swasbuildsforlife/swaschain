@@ -64,6 +64,15 @@ impl Transaction {
         )
     }
 
+    pub fn verify_sender_identity(
+        &self,
+        public_key: &[u8; crate::crypto::signature::PUBLIC_KEY_SIZE],
+    ) -> bool {
+        let derived_address = sha256(public_key);
+
+        derived_address == self.sender
+    }
+
     pub fn serialize(&self) -> [u8; COMPLETE_TRANSACTION_SIZE] {
         let unsigned = self.unsigned_payload();
         let mut serialized = [0u8; COMPLETE_TRANSACTION_SIZE];
@@ -221,5 +230,45 @@ mod tests {
         tx.sign(&signing_key);
 
         assert!(!tx.verify_signature(&wrong_public_key));
+    }
+
+    #[test]
+    fn correct_public_key_matches_sender_identity() {
+        let private_key = [42u8; 32];
+        let signing_key = ed25519_dalek::SigningKey::from_bytes(&private_key);
+        let public_key = signing_key.verifying_key().to_bytes();
+
+        let mut tx = sample_transaction();
+        tx.sender = sha256(&public_key);
+
+        assert!(tx.verify_sender_identity(&public_key));
+    }
+
+    #[test]
+    fn wrong_sender_fails_identity_verification() {
+        let private_key = [42u8; 32];
+        let signing_key = ed25519_dalek::SigningKey::from_bytes(&private_key);
+        let public_key = signing_key.verifying_key().to_bytes();
+
+        let tx = sample_transaction();
+
+        assert!(!tx.verify_sender_identity(&public_key));
+    }
+
+    #[test]
+    fn wrong_public_key_fails_sender_identity_verification() {
+        let signing_key =
+            ed25519_dalek::SigningKey::from_bytes(&[42u8; 32]);
+
+        let wrong_signing_key =
+            ed25519_dalek::SigningKey::from_bytes(&[99u8; 32]);
+
+        let public_key = signing_key.verifying_key().to_bytes();
+        let wrong_public_key = wrong_signing_key.verifying_key().to_bytes();
+
+        let mut tx = sample_transaction();
+        tx.sender = sha256(&public_key);
+
+        assert!(!tx.verify_sender_identity(&wrong_public_key));
     }
 }
