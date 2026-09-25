@@ -1,3 +1,7 @@
+﻿mod transaction;
+
+use transaction::Transaction;
+
 fn main() {
-    println!("Hello, world!");
+    println!("SwasChain transaction layer initialized.");
 }
