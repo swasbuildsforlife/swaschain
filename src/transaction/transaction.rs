@@ -53,6 +53,17 @@ impl Transaction {
             crate::crypto::signature::sign(signing_key, &self.signed_message());
     }
 
+    pub fn verify_signature(
+        &self,
+        public_key: &[u8; crate::crypto::signature::PUBLIC_KEY_SIZE],
+    ) -> bool {
+        crate::crypto::signature::verify(
+            public_key,
+            &self.signed_message(),
+            &self.signature,
+        )
+    }
+
     pub fn serialize(&self) -> [u8; COMPLETE_TRANSACTION_SIZE] {
         let unsigned = self.unsigned_payload();
         let mut serialized = [0u8; COMPLETE_TRANSACTION_SIZE];
@@ -165,5 +176,50 @@ mod tests {
         tx.sign(&signing_key);
 
         assert_ne!(tx.signature, [3u8; SIGNATURE_SIZE]);
+    }
+
+    #[test]
+    fn valid_transaction_signature_verifies() {
+        let mut tx = sample_transaction();
+
+        let private_key = [42u8; 32];
+        let signing_key = ed25519_dalek::SigningKey::from_bytes(&private_key);
+        let public_key = signing_key.verifying_key().to_bytes();
+
+        tx.sign(&signing_key);
+
+        assert!(tx.verify_signature(&public_key));
+    }
+
+    #[test]
+    fn modified_transaction_fails_signature_verification() {
+        let mut tx = sample_transaction();
+
+        let private_key = [42u8; 32];
+        let signing_key = ed25519_dalek::SigningKey::from_bytes(&private_key);
+        let public_key = signing_key.verifying_key().to_bytes();
+
+        tx.sign(&signing_key);
+
+        tx.amount += 1;
+
+        assert!(!tx.verify_signature(&public_key));
+    }
+
+    #[test]
+    fn wrong_public_key_fails_signature_verification() {
+        let mut tx = sample_transaction();
+
+        let private_key = [42u8; 32];
+        let signing_key = ed25519_dalek::SigningKey::from_bytes(&private_key);
+
+        let wrong_private_key = [99u8; 32];
+        let wrong_signing_key =
+            ed25519_dalek::SigningKey::from_bytes(&wrong_private_key);
+        let wrong_public_key = wrong_signing_key.verifying_key().to_bytes();
+
+        tx.sign(&signing_key);
+
+        assert!(!tx.verify_signature(&wrong_public_key));
     }
 }
