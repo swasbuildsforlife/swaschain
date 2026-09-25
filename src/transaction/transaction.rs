@@ -48,6 +48,11 @@ impl Transaction {
         message
     }
 
+    pub fn sign(&mut self, signing_key: &ed25519_dalek::SigningKey) {
+        self.signature =
+            crate::crypto::signature::sign(signing_key, &self.signed_message());
+    }
+
     pub fn serialize(&self) -> [u8; COMPLETE_TRANSACTION_SIZE] {
         let unsigned = self.unsigned_payload();
         let mut serialized = [0u8; COMPLETE_TRANSACTION_SIZE];
@@ -148,5 +153,17 @@ mod tests {
         let tx = sample_transaction();
 
         assert_eq!(tx.transaction_hash().len(), 32);
+    }
+
+    #[test]
+    fn transaction_can_be_signed() {
+        let mut tx = sample_transaction();
+
+        let private_key = [42u8; 32];
+        let signing_key = ed25519_dalek::SigningKey::from_bytes(&private_key);
+
+        tx.sign(&signing_key);
+
+        assert_ne!(tx.signature, [3u8; SIGNATURE_SIZE]);
     }
 }
