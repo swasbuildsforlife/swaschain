@@ -1,4 +1,6 @@
-﻿pub const TRANSACTION_VERSION: u8 = 1;
+﻿use crate::crypto::sha256;
+
+pub const TRANSACTION_VERSION: u8 = 1;
 pub const DEVELOPMENT_CHAIN_ID: u32 = 1;
 
 pub const ADDRESS_SIZE: usize = 32;
@@ -55,6 +57,16 @@ impl Transaction {
 
         serialized
     }
+
+    pub fn transaction_hash(&self) -> [u8; 32] {
+        let serialized = self.serialize();
+
+        let mut data = Vec::with_capacity(TX_HASH_DOMAIN.len() + serialized.len());
+        data.extend_from_slice(TX_HASH_DOMAIN);
+        data.extend_from_slice(&serialized);
+
+        sha256(&data)
+    }
 }
 
 #[cfg(test)]
@@ -105,6 +117,36 @@ mod tests {
         let message = tx.signed_message();
 
         assert!(message.starts_with(TX_DOMAIN));
-        assert_eq!(message.len(), TX_DOMAIN.len() + UNSIGNED_TRANSACTION_SIZE);
+        assert_eq!(
+            message.len(),
+            TX_DOMAIN.len() + UNSIGNED_TRANSACTION_SIZE
+        );
+    }
+
+    #[test]
+    fn transaction_hash_is_deterministic() {
+        let tx = sample_transaction();
+
+        let first = tx.transaction_hash();
+        let second = tx.transaction_hash();
+
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn changing_transaction_changes_hash() {
+        let tx = sample_transaction();
+        let mut modified = tx.clone();
+
+        modified.amount += 1;
+
+        assert_ne!(tx.transaction_hash(), modified.transaction_hash());
+    }
+
+    #[test]
+    fn transaction_hash_has_correct_size() {
+        let tx = sample_transaction();
+
+        assert_eq!(tx.transaction_hash().len(), 32);
     }
 }
