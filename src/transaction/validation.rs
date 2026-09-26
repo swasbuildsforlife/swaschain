@@ -8,11 +8,14 @@ pub enum ValidationError {
     InvalidFee,
     InvalidSignature,
     InvalidSender,
+    IntegerOverflow,
+    InsufficientBalance,
 }
 
 pub fn validate_transaction(
     transaction: &Transaction,
     public_key: &[u8; crate::crypto::signature::PUBLIC_KEY_SIZE],
+    sender_balance: u64,
 ) -> Result<(), ValidationError> {
     if transaction.version != super::transaction::TRANSACTION_VERSION {
         return Err(ValidationError::UnsupportedVersion);
@@ -30,12 +33,21 @@ pub fn validate_transaction(
         return Err(ValidationError::InvalidFee);
     }
 
+    if !transaction.verify_sender_identity(public_key) {
+        return Err(ValidationError::InvalidSender);
+    }
+
     if !transaction.verify_signature(public_key) {
         return Err(ValidationError::InvalidSignature);
     }
 
-    if !transaction.verify_sender_identity(public_key) {
-        return Err(ValidationError::InvalidSender);
+    let required_balance = transaction
+        .amount
+        .checked_add(transaction.fee)
+        .ok_or(ValidationError::IntegerOverflow)?;
+
+    if sender_balance < required_balance {
+        return Err(ValidationError::InsufficientBalance);
     }
 
     Ok(())
@@ -82,7 +94,7 @@ mod tests {
         let (transaction, public_key) = valid_transaction();
 
         assert_eq!(
-            validate_transaction(&transaction, &public_key),
+            validate_transaction(&transaction, &public_key, 2_000_000),
             Ok(())
         );
     }
@@ -94,7 +106,7 @@ mod tests {
         transaction.version = 2;
 
         assert_eq!(
-            validate_transaction(&transaction, &public_key),
+            validate_transaction(&transaction, &public_key, 2_000_000),
             Err(ValidationError::UnsupportedVersion)
         );
     }
@@ -106,7 +118,7 @@ mod tests {
         transaction.chain_id = 99;
 
         assert_eq!(
-            validate_transaction(&transaction, &public_key),
+            validate_transaction(&transaction, &public_key, 2_000_000),
             Err(ValidationError::InvalidChainId)
         );
     }
@@ -118,7 +130,7 @@ mod tests {
         transaction.amount = 0;
 
         assert_eq!(
-            validate_transaction(&transaction, &public_key),
+            validate_transaction(&transaction, &public_key, 2_000_000),
             Err(ValidationError::InvalidAmount)
         );
     }
@@ -130,7 +142,7 @@ mod tests {
         transaction.fee = 0;
 
         assert_eq!(
-            validate_transaction(&transaction, &public_key),
+            validate_transaction(&transaction, &public_key, 2_000_000),
             Err(ValidationError::InvalidFee)
         );
     }
@@ -142,7 +154,7 @@ mod tests {
         transaction.signature[0] ^= 1;
 
         assert_eq!(
-            validate_transaction(&transaction, &public_key),
+            validate_transaction(&transaction, &public_key, 2_000_000),
             Err(ValidationError::InvalidSignature)
         );
     }
@@ -154,8 +166,62 @@ mod tests {
         transaction.sender = [99u8; ADDRESS_SIZE];
 
         assert_eq!(
-            validate_transaction(&transaction, &public_key),
-            Err(ValidationError::InvalidSignature)
+            validate_transaction(&transaction, &public_key, 2_000_000),
+            Err(ValidationError::InvalidSender)
+        );
+    }
+
+    #[test]
+    fn insufficient_balance_is_rejected() {
+        let (transaction, public_key) = valid_transaction();
+
+        assert_eq!(
+            validate_transaction(&transaction, &public_key, 1_000_099),
+            Err(ValidationError::InsufficientBalance)
+        );
+    }
+
+    #[test]
+    fn exact_balance_is_accepted() {
+        let (transaction, public_key) = valid_transaction();
+
+        assert_eq!(
+            validate_transaction(&transaction, &public_key, 1_000_100),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn balance_above_required_amount_is_accepted() {
+        let (transaction, public_key) = valid_transaction();
+
+        assert_eq!(
+            validate_transaction(&transaction, &public_key, 5_000_000),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn amount_and_fee_overflow_is_rejected() {
+        let key = signing_key();
+        let public_key = key.verifying_key().to_bytes();
+
+        let mut transaction = Transaction {
+            version: TRANSACTION_VERSION,
+            chain_id: DEVELOPMENT_CHAIN_ID,
+            sender: sha256(&public_key),
+            recipient: [2u8; ADDRESS_SIZE],
+            amount: u64::MAX,
+            nonce: 1,
+            fee: 1,
+            signature: [0u8; SIGNATURE_SIZE],
+        };
+
+        transaction.sign(&key);
+
+        assert_eq!(
+            validate_transaction(&transaction, &public_key, u64::MAX),
+            Err(ValidationError::IntegerOverflow)
         );
     }
 }
