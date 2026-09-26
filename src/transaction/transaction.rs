@@ -83,6 +83,37 @@ impl Transaction {
         serialized
     }
 
+    pub fn deserialize(
+        bytes: &[u8; COMPLETE_TRANSACTION_SIZE],
+    ) -> Self {
+        let mut sender = [0u8; ADDRESS_SIZE];
+        let mut recipient = [0u8; ADDRESS_SIZE];
+        let mut signature = [0u8; SIGNATURE_SIZE];
+
+        sender.copy_from_slice(&bytes[5..37]);
+        recipient.copy_from_slice(&bytes[37..69]);
+        signature.copy_from_slice(&bytes[UNSIGNED_TRANSACTION_SIZE..]);
+
+        Self {
+            version: bytes[0],
+            chain_id: u32::from_be_bytes(
+                bytes[1..5].try_into().unwrap(),
+            ),
+            sender,
+            recipient,
+            amount: u64::from_be_bytes(
+                bytes[69..77].try_into().unwrap(),
+            ),
+            nonce: u64::from_be_bytes(
+                bytes[77..85].try_into().unwrap(),
+            ),
+            fee: u64::from_be_bytes(
+                bytes[85..93].try_into().unwrap(),
+            ),
+            signature,
+        }
+    }
+
     pub fn transaction_hash(&self) -> [u8; 32] {
         let serialized = self.serialize();
 
@@ -270,5 +301,44 @@ mod tests {
         tx.sender = sha256(&public_key);
 
         assert!(!tx.verify_sender_identity(&wrong_public_key));
+    }
+
+    #[test]
+    fn serialized_transaction_can_be_deserialized() {
+        let tx = sample_transaction();
+
+        let serialized = tx.serialize();
+        let decoded = Transaction::deserialize(&serialized);
+
+        assert_eq!(decoded, tx);
+    }
+
+    #[test]
+    fn serialize_deserialize_round_trip_is_deterministic() {
+        let tx = sample_transaction();
+
+        let serialized = tx.serialize();
+        let decoded = Transaction::deserialize(&serialized);
+        let reserialized = decoded.serialize();
+
+        assert_eq!(reserialized, serialized);
+    }
+
+    #[test]
+    fn signed_transaction_survives_serialization_round_trip() {
+        let mut tx = sample_transaction();
+
+        let private_key = [42u8; 32];
+        let signing_key = ed25519_dalek::SigningKey::from_bytes(&private_key);
+
+        tx.sign(&signing_key);
+
+        let public_key = signing_key.verifying_key().to_bytes();
+
+        let serialized = tx.serialize();
+        let decoded = Transaction::deserialize(&serialized);
+
+        assert_eq!(decoded, tx);
+        assert!(decoded.verify_signature(&public_key));
     }
 }
