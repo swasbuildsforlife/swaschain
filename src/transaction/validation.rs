@@ -6,6 +6,7 @@ pub enum ValidationError {
     InvalidChainId,
     InvalidAmount,
     InvalidFee,
+    InvalidNonce,
     InvalidSignature,
     InvalidSender,
     IntegerOverflow,
@@ -16,6 +17,7 @@ pub fn validate_transaction(
     transaction: &Transaction,
     public_key: &[u8; crate::crypto::signature::PUBLIC_KEY_SIZE],
     sender_balance: u64,
+    expected_nonce: u64,
 ) -> Result<(), ValidationError> {
     if transaction.version != super::transaction::TRANSACTION_VERSION {
         return Err(ValidationError::UnsupportedVersion);
@@ -31,6 +33,10 @@ pub fn validate_transaction(
 
     if transaction.fee == 0 {
         return Err(ValidationError::InvalidFee);
+    }
+
+    if transaction.nonce != expected_nonce {
+        return Err(ValidationError::InvalidNonce);
     }
 
     if !transaction.verify_sender_identity(public_key) {
@@ -79,7 +85,7 @@ mod tests {
             sender: sha256(&public_key),
             recipient: [2u8; ADDRESS_SIZE],
             amount: 1_000_000,
-            nonce: 1,
+            nonce: 5,
             fee: 100,
             signature: [0u8; SIGNATURE_SIZE],
         };
@@ -94,7 +100,7 @@ mod tests {
         let (transaction, public_key) = valid_transaction();
 
         assert_eq!(
-            validate_transaction(&transaction, &public_key, 2_000_000),
+            validate_transaction(&transaction, &public_key, 2_000_000, 5),
             Ok(())
         );
     }
@@ -106,7 +112,7 @@ mod tests {
         transaction.version = 2;
 
         assert_eq!(
-            validate_transaction(&transaction, &public_key, 2_000_000),
+            validate_transaction(&transaction, &public_key, 2_000_000, 5),
             Err(ValidationError::UnsupportedVersion)
         );
     }
@@ -118,7 +124,7 @@ mod tests {
         transaction.chain_id = 99;
 
         assert_eq!(
-            validate_transaction(&transaction, &public_key, 2_000_000),
+            validate_transaction(&transaction, &public_key, 2_000_000, 5),
             Err(ValidationError::InvalidChainId)
         );
     }
@@ -130,7 +136,7 @@ mod tests {
         transaction.amount = 0;
 
         assert_eq!(
-            validate_transaction(&transaction, &public_key, 2_000_000),
+            validate_transaction(&transaction, &public_key, 2_000_000, 5),
             Err(ValidationError::InvalidAmount)
         );
     }
@@ -142,8 +148,42 @@ mod tests {
         transaction.fee = 0;
 
         assert_eq!(
-            validate_transaction(&transaction, &public_key, 2_000_000),
+            validate_transaction(&transaction, &public_key, 2_000_000, 5),
             Err(ValidationError::InvalidFee)
+        );
+    }
+
+    #[test]
+    fn invalid_nonce_is_rejected_when_nonce_is_too_low() {
+        let (mut transaction, public_key) = valid_transaction();
+
+        transaction.nonce = 4;
+
+        assert_eq!(
+            validate_transaction(&transaction, &public_key, 2_000_000, 5),
+            Err(ValidationError::InvalidNonce)
+        );
+    }
+
+    #[test]
+    fn invalid_nonce_is_rejected_when_nonce_is_too_high() {
+        let (mut transaction, public_key) = valid_transaction();
+
+        transaction.nonce = 6;
+
+        assert_eq!(
+            validate_transaction(&transaction, &public_key, 2_000_000, 5),
+            Err(ValidationError::InvalidNonce)
+        );
+    }
+
+    #[test]
+    fn expected_nonce_is_accepted() {
+        let (transaction, public_key) = valid_transaction();
+
+        assert_eq!(
+            validate_transaction(&transaction, &public_key, 2_000_000, 5),
+            Ok(())
         );
     }
 
@@ -154,7 +194,7 @@ mod tests {
         transaction.signature[0] ^= 1;
 
         assert_eq!(
-            validate_transaction(&transaction, &public_key, 2_000_000),
+            validate_transaction(&transaction, &public_key, 2_000_000, 5),
             Err(ValidationError::InvalidSignature)
         );
     }
@@ -166,7 +206,7 @@ mod tests {
         transaction.sender = [99u8; ADDRESS_SIZE];
 
         assert_eq!(
-            validate_transaction(&transaction, &public_key, 2_000_000),
+            validate_transaction(&transaction, &public_key, 2_000_000, 5),
             Err(ValidationError::InvalidSender)
         );
     }
@@ -176,7 +216,7 @@ mod tests {
         let (transaction, public_key) = valid_transaction();
 
         assert_eq!(
-            validate_transaction(&transaction, &public_key, 1_000_099),
+            validate_transaction(&transaction, &public_key, 1_000_099, 5),
             Err(ValidationError::InsufficientBalance)
         );
     }
@@ -186,7 +226,7 @@ mod tests {
         let (transaction, public_key) = valid_transaction();
 
         assert_eq!(
-            validate_transaction(&transaction, &public_key, 1_000_100),
+            validate_transaction(&transaction, &public_key, 1_000_100, 5),
             Ok(())
         );
     }
@@ -196,7 +236,7 @@ mod tests {
         let (transaction, public_key) = valid_transaction();
 
         assert_eq!(
-            validate_transaction(&transaction, &public_key, 5_000_000),
+            validate_transaction(&transaction, &public_key, 5_000_000, 5),
             Ok(())
         );
     }
@@ -212,7 +252,7 @@ mod tests {
             sender: sha256(&public_key),
             recipient: [2u8; ADDRESS_SIZE],
             amount: u64::MAX,
-            nonce: 1,
+            nonce: 5,
             fee: 1,
             signature: [0u8; SIGNATURE_SIZE],
         };
@@ -220,7 +260,7 @@ mod tests {
         transaction.sign(&key);
 
         assert_eq!(
-            validate_transaction(&transaction, &public_key, u64::MAX),
+            validate_transaction(&transaction, &public_key, u64::MAX, 5),
             Err(ValidationError::IntegerOverflow)
         );
     }
