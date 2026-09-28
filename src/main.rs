@@ -1,8 +1,6 @@
-﻿mod crypto;
-mod transaction;
-
-use transaction::Transaction;
+﻿mod protocol;
 
 fn main() {
-    println!("SwasChain transaction layer initialized.");
+    println!("SwasChain protocol v{}", protocol::PROTOCOL_VERSION);
+    println!("Chain ID: {}", protocol::CHAIN_ID);
 }
