@@ -9,6 +9,7 @@ pub enum ValidationError {
     InvalidNonce,
     InvalidSignature,
     InvalidSender,
+    InvalidRecipient,
     IntegerOverflow,
     InsufficientBalance,
 }
@@ -51,6 +52,10 @@ impl TransactionValidator {
             return Err(ValidationError::InvalidSender);
         }
 
+        if transaction.sender == transaction.recipient {
+            return Err(ValidationError::InvalidRecipient);
+        }
+
         if !transaction.verify_signature(public_key) {
             return Err(ValidationError::InvalidSignature);
         }
@@ -89,11 +94,7 @@ mod tests {
     use super::*;
     use crate::crypto::sha256;
     use crate::transaction::transaction::{
-        Transaction,
-        ADDRESS_SIZE,
-        DEVELOPMENT_CHAIN_ID,
-        SIGNATURE_SIZE,
-        TRANSACTION_VERSION,
+        ADDRESS_SIZE, DEVELOPMENT_CHAIN_ID, SIGNATURE_SIZE, TRANSACTION_VERSION, Transaction,
     };
 
     fn signing_key() -> ed25519_dalek::SigningKey {
@@ -132,11 +133,7 @@ mod tests {
         let (transaction, public_key) = valid_transaction();
 
         assert_eq!(
-            TransactionValidator::validate(
-                &transaction,
-                &public_key,
-                valid_context()
-            ),
+            TransactionValidator::validate(&transaction, &public_key, valid_context()),
             Ok(())
         );
     }
@@ -145,18 +142,9 @@ mod tests {
     fn validation_wrapper_matches_validator() {
         let (transaction, public_key) = valid_transaction();
 
-        let direct = TransactionValidator::validate(
-            &transaction,
-            &public_key,
-            valid_context(),
-        );
+        let direct = TransactionValidator::validate(&transaction, &public_key, valid_context());
 
-        let wrapper = validate_transaction(
-            &transaction,
-            &public_key,
-            2_000_000,
-            5,
-        );
+        let wrapper = validate_transaction(&transaction, &public_key, 2_000_000, 5);
 
         assert_eq!(direct, wrapper);
     }
@@ -168,11 +156,7 @@ mod tests {
         transaction.version = 2;
 
         assert_eq!(
-            TransactionValidator::validate(
-                &transaction,
-                &public_key,
-                valid_context()
-            ),
+            TransactionValidator::validate(&transaction, &public_key, valid_context()),
             Err(ValidationError::UnsupportedVersion)
         );
     }
@@ -184,11 +168,7 @@ mod tests {
         transaction.chain_id = 99;
 
         assert_eq!(
-            TransactionValidator::validate(
-                &transaction,
-                &public_key,
-                valid_context()
-            ),
+            TransactionValidator::validate(&transaction, &public_key, valid_context()),
             Err(ValidationError::InvalidChainId)
         );
     }
@@ -200,11 +180,7 @@ mod tests {
         transaction.amount = 0;
 
         assert_eq!(
-            TransactionValidator::validate(
-                &transaction,
-                &public_key,
-                valid_context()
-            ),
+            TransactionValidator::validate(&transaction, &public_key, valid_context()),
             Err(ValidationError::InvalidAmount)
         );
     }
@@ -216,11 +192,7 @@ mod tests {
         transaction.fee = 0;
 
         assert_eq!(
-            TransactionValidator::validate(
-                &transaction,
-                &public_key,
-                valid_context()
-            ),
+            TransactionValidator::validate(&transaction, &public_key, valid_context()),
             Err(ValidationError::InvalidFee)
         );
     }
@@ -232,11 +204,7 @@ mod tests {
         transaction.nonce = 4;
 
         assert_eq!(
-            TransactionValidator::validate(
-                &transaction,
-                &public_key,
-                valid_context()
-            ),
+            TransactionValidator::validate(&transaction, &public_key, valid_context()),
             Err(ValidationError::InvalidNonce)
         );
     }
@@ -248,11 +216,7 @@ mod tests {
         transaction.nonce = 6;
 
         assert_eq!(
-            TransactionValidator::validate(
-                &transaction,
-                &public_key,
-                valid_context()
-            ),
+            TransactionValidator::validate(&transaction, &public_key, valid_context()),
             Err(ValidationError::InvalidNonce)
         );
     }
@@ -264,12 +228,33 @@ mod tests {
         transaction.sender = [99u8; ADDRESS_SIZE];
 
         assert_eq!(
-            TransactionValidator::validate(
-                &transaction,
-                &public_key,
-                valid_context()
-            ),
+            TransactionValidator::validate(&transaction, &public_key, valid_context()),
             Err(ValidationError::InvalidSender)
+        );
+    }
+
+    #[test]
+    fn validator_rejects_self_transfer() {
+        let key = signing_key();
+        let public_key = key.verifying_key().to_bytes();
+        let sender = sha256(&public_key);
+
+        let mut transaction = Transaction {
+            version: TRANSACTION_VERSION,
+            chain_id: DEVELOPMENT_CHAIN_ID,
+            sender,
+            recipient: sender,
+            amount: 1_000_000,
+            nonce: 5,
+            fee: 100,
+            signature: [0u8; SIGNATURE_SIZE],
+        };
+
+        transaction.sign(&key);
+
+        assert_eq!(
+            TransactionValidator::validate(&transaction, &public_key, valid_context()),
+            Err(ValidationError::InvalidRecipient)
         );
     }
 
@@ -280,11 +265,7 @@ mod tests {
         transaction.signature[0] ^= 1;
 
         assert_eq!(
-            TransactionValidator::validate(
-                &transaction,
-                &public_key,
-                valid_context()
-            ),
+            TransactionValidator::validate(&transaction, &public_key, valid_context()),
             Err(ValidationError::InvalidSignature)
         );
     }
@@ -299,11 +280,7 @@ mod tests {
         };
 
         assert_eq!(
-            TransactionValidator::validate(
-                &transaction,
-                &public_key,
-                context
-            ),
+            TransactionValidator::validate(&transaction, &public_key, context),
             Err(ValidationError::InsufficientBalance)
         );
     }
@@ -318,11 +295,7 @@ mod tests {
         };
 
         assert_eq!(
-            TransactionValidator::validate(
-                &transaction,
-                &public_key,
-                context
-            ),
+            TransactionValidator::validate(&transaction, &public_key, context),
             Ok(())
         );
     }
@@ -351,11 +324,7 @@ mod tests {
         };
 
         assert_eq!(
-            TransactionValidator::validate(
-                &transaction,
-                &public_key,
-                context
-            ),
+            TransactionValidator::validate(&transaction, &public_key, context),
             Err(ValidationError::IntegerOverflow)
         );
     }
