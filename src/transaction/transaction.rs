@@ -1,4 +1,4 @@
-﻿use crate::crypto::sha256;
+use crate::crypto::sha256;
 
 pub const TRANSACTION_VERSION: u8 = 1;
 pub const DEVELOPMENT_CHAIN_ID: u32 = 1;
@@ -14,6 +14,8 @@ pub const TX_HASH_DOMAIN: &[u8] = b"SWASCHAIN_TX_HASH_V1";
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SerializationError {
     InvalidLength,
+    UnsupportedVersion,
+    InvalidChainId,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,19 +56,14 @@ impl Transaction {
     }
 
     pub fn sign(&mut self, signing_key: &ed25519_dalek::SigningKey) {
-        self.signature =
-            crate::crypto::signature::sign(signing_key, &self.signed_message());
+        self.signature = crate::crypto::signature::sign(signing_key, &self.signed_message());
     }
 
     pub fn verify_signature(
         &self,
         public_key: &[u8; crate::crypto::signature::PUBLIC_KEY_SIZE],
     ) -> bool {
-        crate::crypto::signature::verify(
-            public_key,
-            &self.signed_message(),
-            &self.signature,
-        )
+        crate::crypto::signature::verify(public_key, &self.signed_message(), &self.signature)
     }
 
     pub fn verify_sender_identity(
@@ -88,9 +85,7 @@ impl Transaction {
         serialized
     }
 
-    pub fn deserialize(
-        bytes: &[u8; COMPLETE_TRANSACTION_SIZE],
-    ) -> Self {
+    pub fn deserialize(bytes: &[u8; COMPLETE_TRANSACTION_SIZE]) -> Self {
         let mut sender = [0u8; ADDRESS_SIZE];
         let mut recipient = [0u8; ADDRESS_SIZE];
         let mut signature = [0u8; SIGNATURE_SIZE];
@@ -101,27 +96,17 @@ impl Transaction {
 
         Self {
             version: bytes[0],
-            chain_id: u32::from_be_bytes(
-                bytes[1..5].try_into().unwrap(),
-            ),
+            chain_id: u32::from_be_bytes(bytes[1..5].try_into().unwrap()),
             sender,
             recipient,
-            amount: u64::from_be_bytes(
-                bytes[69..77].try_into().unwrap(),
-            ),
-            nonce: u64::from_be_bytes(
-                bytes[77..85].try_into().unwrap(),
-            ),
-            fee: u64::from_be_bytes(
-                bytes[85..93].try_into().unwrap(),
-            ),
+            amount: u64::from_be_bytes(bytes[69..77].try_into().unwrap()),
+            nonce: u64::from_be_bytes(bytes[77..85].try_into().unwrap()),
+            fee: u64::from_be_bytes(bytes[85..93].try_into().unwrap()),
             signature,
         }
     }
 
-    pub fn try_deserialize(
-        bytes: &[u8],
-    ) -> Result<Self, SerializationError> {
+    pub fn try_deserialize(bytes: &[u8]) -> Result<Self, SerializationError> {
         if bytes.len() != COMPLETE_TRANSACTION_SIZE {
             return Err(SerializationError::InvalidLength);
         }
@@ -129,14 +114,23 @@ impl Transaction {
         let mut fixed_bytes = [0u8; COMPLETE_TRANSACTION_SIZE];
         fixed_bytes.copy_from_slice(bytes);
 
-        Ok(Self::deserialize(&fixed_bytes))
+        let transaction = Self::deserialize(&fixed_bytes);
+
+        if transaction.version != TRANSACTION_VERSION {
+            return Err(SerializationError::UnsupportedVersion);
+        }
+
+        if transaction.chain_id != DEVELOPMENT_CHAIN_ID {
+            return Err(SerializationError::InvalidChainId);
+        }
+
+        Ok(transaction)
     }
 
     pub fn transaction_hash(&self) -> [u8; 32] {
         let serialized = self.serialize();
 
-        let mut data =
-            Vec::with_capacity(TX_HASH_DOMAIN.len() + serialized.len());
+        let mut data = Vec::with_capacity(TX_HASH_DOMAIN.len() + serialized.len());
 
         data.extend_from_slice(TX_HASH_DOMAIN);
         data.extend_from_slice(&serialized);
@@ -166,20 +160,14 @@ mod tests {
     fn unsigned_payload_has_protocol_size() {
         let tx = sample_transaction();
 
-        assert_eq!(
-            tx.unsigned_payload().len(),
-            UNSIGNED_TRANSACTION_SIZE
-        );
+        assert_eq!(tx.unsigned_payload().len(), UNSIGNED_TRANSACTION_SIZE);
     }
 
     #[test]
     fn complete_transaction_has_protocol_size() {
         let tx = sample_transaction();
 
-        assert_eq!(
-            tx.serialize().len(),
-            COMPLETE_TRANSACTION_SIZE
-        );
+        assert_eq!(tx.serialize().len(), COMPLETE_TRANSACTION_SIZE);
     }
 
     #[test]
@@ -188,10 +176,7 @@ mod tests {
         let payload = tx.unsigned_payload();
 
         assert_eq!(&payload[1..5], &1u32.to_be_bytes());
-        assert_eq!(
-            &payload[69..77],
-            &1_000_000u64.to_be_bytes()
-        );
+        assert_eq!(&payload[69..77], &1_000_000u64.to_be_bytes());
         assert_eq!(&payload[77..85], &1u64.to_be_bytes());
         assert_eq!(&payload[85..93], &100u64.to_be_bytes());
     }
@@ -202,10 +187,7 @@ mod tests {
         let message = tx.signed_message();
 
         assert!(message.starts_with(TX_DOMAIN));
-        assert_eq!(
-            message.len(),
-            TX_DOMAIN.len() + UNSIGNED_TRANSACTION_SIZE
-        );
+        assert_eq!(message.len(), TX_DOMAIN.len() + UNSIGNED_TRANSACTION_SIZE);
     }
 
     #[test]
@@ -225,10 +207,7 @@ mod tests {
         let mut modified = tx.clone();
         modified.amount += 1;
 
-        assert_ne!(
-            tx.transaction_hash(),
-            modified.transaction_hash()
-        );
+        assert_ne!(tx.transaction_hash(), modified.transaction_hash());
     }
 
     #[test]
@@ -243,15 +222,11 @@ mod tests {
         let mut tx = sample_transaction();
 
         let private_key = [42u8; 32];
-        let signing_key =
-            ed25519_dalek::SigningKey::from_bytes(&private_key);
+        let signing_key = ed25519_dalek::SigningKey::from_bytes(&private_key);
 
         tx.sign(&signing_key);
 
-        assert_ne!(
-            tx.signature,
-            [3u8; SIGNATURE_SIZE]
-        );
+        assert_ne!(tx.signature, [3u8; SIGNATURE_SIZE]);
     }
 
     #[test]
@@ -259,11 +234,9 @@ mod tests {
         let mut tx = sample_transaction();
 
         let private_key = [42u8; 32];
-        let signing_key =
-            ed25519_dalek::SigningKey::from_bytes(&private_key);
+        let signing_key = ed25519_dalek::SigningKey::from_bytes(&private_key);
 
-        let public_key =
-            signing_key.verifying_key().to_bytes();
+        let public_key = signing_key.verifying_key().to_bytes();
 
         tx.sign(&signing_key);
 
@@ -275,11 +248,9 @@ mod tests {
         let mut tx = sample_transaction();
 
         let private_key = [42u8; 32];
-        let signing_key =
-            ed25519_dalek::SigningKey::from_bytes(&private_key);
+        let signing_key = ed25519_dalek::SigningKey::from_bytes(&private_key);
 
-        let public_key =
-            signing_key.verifying_key().to_bytes();
+        let public_key = signing_key.verifying_key().to_bytes();
 
         tx.sign(&signing_key);
         tx.amount += 1;
@@ -292,17 +263,12 @@ mod tests {
         let mut tx = sample_transaction();
 
         let private_key = [42u8; 32];
-        let signing_key =
-            ed25519_dalek::SigningKey::from_bytes(&private_key);
+        let signing_key = ed25519_dalek::SigningKey::from_bytes(&private_key);
 
         let wrong_private_key = [99u8; 32];
-        let wrong_signing_key =
-            ed25519_dalek::SigningKey::from_bytes(
-                &wrong_private_key
-            );
+        let wrong_signing_key = ed25519_dalek::SigningKey::from_bytes(&wrong_private_key);
 
-        let wrong_public_key =
-            wrong_signing_key.verifying_key().to_bytes();
+        let wrong_public_key = wrong_signing_key.verifying_key().to_bytes();
 
         tx.sign(&signing_key);
 
@@ -312,11 +278,9 @@ mod tests {
     #[test]
     fn correct_public_key_matches_sender_identity() {
         let private_key = [42u8; 32];
-        let signing_key =
-            ed25519_dalek::SigningKey::from_bytes(&private_key);
+        let signing_key = ed25519_dalek::SigningKey::from_bytes(&private_key);
 
-        let public_key =
-            signing_key.verifying_key().to_bytes();
+        let public_key = signing_key.verifying_key().to_bytes();
 
         let mut tx = sample_transaction();
 
@@ -328,11 +292,9 @@ mod tests {
     #[test]
     fn wrong_sender_fails_identity_verification() {
         let private_key = [42u8; 32];
-        let signing_key =
-            ed25519_dalek::SigningKey::from_bytes(&private_key);
+        let signing_key = ed25519_dalek::SigningKey::from_bytes(&private_key);
 
-        let public_key =
-            signing_key.verifying_key().to_bytes();
+        let public_key = signing_key.verifying_key().to_bytes();
 
         let tx = sample_transaction();
 
@@ -341,17 +303,13 @@ mod tests {
 
     #[test]
     fn wrong_public_key_fails_sender_identity_verification() {
-        let signing_key =
-            ed25519_dalek::SigningKey::from_bytes(&[42u8; 32]);
+        let signing_key = ed25519_dalek::SigningKey::from_bytes(&[42u8; 32]);
 
-        let wrong_signing_key =
-            ed25519_dalek::SigningKey::from_bytes(&[99u8; 32]);
+        let wrong_signing_key = ed25519_dalek::SigningKey::from_bytes(&[99u8; 32]);
 
-        let public_key =
-            signing_key.verifying_key().to_bytes();
+        let public_key = signing_key.verifying_key().to_bytes();
 
-        let wrong_public_key =
-            wrong_signing_key.verifying_key().to_bytes();
+        let wrong_public_key = wrong_signing_key.verifying_key().to_bytes();
 
         let mut tx = sample_transaction();
 
@@ -386,13 +344,11 @@ mod tests {
         let mut tx = sample_transaction();
 
         let private_key = [42u8; 32];
-        let signing_key =
-            ed25519_dalek::SigningKey::from_bytes(&private_key);
+        let signing_key = ed25519_dalek::SigningKey::from_bytes(&private_key);
 
         tx.sign(&signing_key);
 
-        let public_key =
-            signing_key.verifying_key().to_bytes();
+        let public_key = signing_key.verifying_key().to_bytes();
 
         let serialized = tx.serialize();
         let decoded = Transaction::deserialize(&serialized);
@@ -406,9 +362,8 @@ mod tests {
         let tx = sample_transaction();
         let serialized = tx.serialize();
 
-        let decoded =
-            Transaction::try_deserialize(&serialized)
-                .expect("valid transaction should deserialize");
+        let decoded = Transaction::try_deserialize(&serialized)
+            .expect("valid transaction should deserialize");
 
         assert_eq!(decoded, tx);
     }
@@ -444,18 +399,38 @@ mod tests {
     }
 
     #[test]
+    fn try_deserialize_rejects_unsupported_version() {
+        let mut bytes = sample_transaction().serialize();
+
+        bytes[0] = TRANSACTION_VERSION + 1;
+
+        assert_eq!(
+            Transaction::try_deserialize(&bytes),
+            Err(SerializationError::UnsupportedVersion)
+        );
+    }
+
+    #[test]
+    fn try_deserialize_rejects_invalid_chain_id() {
+        let mut bytes = sample_transaction().serialize();
+
+        bytes[1..5].copy_from_slice(&99u32.to_be_bytes());
+
+        assert_eq!(
+            Transaction::try_deserialize(&bytes),
+            Err(SerializationError::InvalidChainId)
+        );
+    }
+
+    #[test]
     fn try_deserialize_preserves_transaction_hash() {
         let tx = sample_transaction();
 
         let serialized = tx.serialize();
 
-        let decoded =
-            Transaction::try_deserialize(&serialized)
-                .expect("valid transaction should deserialize");
+        let decoded = Transaction::try_deserialize(&serialized)
+            .expect("valid transaction should deserialize");
 
-        assert_eq!(
-            decoded.transaction_hash(),
-            tx.transaction_hash()
-        );
+        assert_eq!(decoded.transaction_hash(), tx.transaction_hash());
     }
 }
